@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XO (Tic-Tac-Toe) - Minimax & Alpha-Beta</title>
+<style>
+  :root { --bg:#f4f5f7; --card:#fff; --text:#1f2430; --muted:#6b7280; --line:#cfd3da; --accent:#2f6fed; --x:#d64545; --o:#f0a52b; --win:#e8f5e9; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14161a; --card:#1e2127; --text:#e8eaee; --muted:#9aa1ad; --line:#3a3f49; --accent:#6b9bff; --win:#1f3a26; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px; font-family:system-ui,Segoe UI,Arial,sans-serif; background:var(--bg); color:var(--text); }
+  .app { max-width:900px; margin:0 auto; background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  h1 { font-size:16px; margin:0; padding:14px 18px; border-bottom:1px solid var(--line); }
+  .layout { display:flex; flex-wrap:wrap; gap:20px; padding:20px; }
+  .panel { flex:1 1 200px; min-width:190px; }
+  .center { flex:2 1 320px; display:flex; flex-direction:column; align-items:center; }
+  fieldset { border:0; padding:0; margin:0 0 16px; }
+  legend { font-weight:600; font-size:14px; margin-bottom:6px; padding:0; }
+  label { display:block; font-size:14px; padding:3px 0; cursor:pointer; }
+  button#new { width:100%; padding:10px; border:2px solid var(--accent); background:transparent; color:var(--text); border-radius:8px; font-size:14px; cursor:pointer; }
+  button#new:hover { background:var(--accent); color:#fff; }
+  .board { display:grid; grid-template-columns:repeat(3,1fr); width:min(330px,90vw); aspect-ratio:1; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .cell { position:relative; border:0; background:transparent; border-right:1px solid var(--line); border-bottom:1px solid var(--line); cursor:pointer; padding:0; color:var(--text); }
+  .cell:nth-child(3n) { border-right:0; } .cell:nth-child(n+7) { border-bottom:0; }
+  .cell:not(:disabled):hover { background:rgba(47,111,237,.08); }
+  .cell:disabled { cursor:default; }
+  .cell.win { background:var(--win); }
+  .cell.hint { background:rgba(47,111,237,.15); box-shadow:inset 0 0 0 3px var(--accent); animation:pulse 1s infinite alternate; }
+  @keyframes pulse { to { background:rgba(47,111,237,.32); } }
+  button#hint { width:100%; padding:10px; margin-bottom:10px; border:2px solid #3aa655; background:transparent; color:var(--text); border-radius:8px; font-size:14px; cursor:pointer; }
+  button#hint:hover:not(:disabled) { background:#3aa655; color:#fff; } button#hint:disabled { opacity:.45; cursor:default; }
+  .cell .num { position:absolute; right:8px; top:6px; font-size:11px; color:var(--muted); }
+  .cell svg { width:70%; height:70%; }
+  .win-svg-x { stroke:var(--x); } .win.cell { box-shadow:inset 0 0 0 3px #3aa655; }
+  #status { margin-top:14px; width:min(330px,90vw); text-align:center; padding:10px; border-radius:8px; background:var(--bg); border:1px solid var(--line); font-weight:600; }
+  .hint { font-size:12px; color:var(--muted); margin-top:8px; }
+  .info { border:1px solid var(--line); border-radius:10px; padding:12px 14px; font-size:14px; }
+  .info h2 { margin:0 0 8px; font-size:14px; } .info p { margin:4px 0; color:var(--muted); } .info b { color:var(--text); }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>XO (Tic-Tac-Toe)</h1>
+  <div class="layout">
+    <div class="panel">
+      <fieldset><legend>Who plays first</legend>
+        <label><input type="radio" name="first" value="human" checked> Human (X)</label>
+        <label><input type="radio" name="first" value="computer"> Computer (O)</label>
+      </fieldset>
+      <fieldset><legend>Algorithm</legend>
+        <label><input type="radio" name="algo" value="minimax"> Minimax</label>
+        <label><input type="radio" name="algo" value="alphabeta" checked> Alpha-Beta</label>
+      </fieldset>
+      <fieldset><legend>Level</legend>
+        <label><input type="radio" name="level" value="easy"> Easy (random move)</label>
+        <label><input type="radio" name="level" value="medium"> Medium (depth 2)</label>
+        <label><input type="radio" name="level" value="hard" checked> Hard (full search)</label>
+      </fieldset>
+      <button id="hint">&#128161; Hint</button>
+      <button id="new">New Game</button>
+    </div>
+    <div class="center">
+      <div class="board" id="board"></div>
+      <div id="status">Your turn (X)</div>
+      <div class="hint">click an empty cell (cells numbered 0 to 8)</div>
+    </div>
+    <div class="panel">
+      <div class="info" id="info"><h2>Last AI move</h2><p>No move yet</p></div>
+      <div class="info" id="hintbox" style="margin-top:12px;display:none"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const X_SVG = '<svg viewBox="0 0 100 100"><path d="M18 18L82 82M82 18L18 82" stroke="#d64545" stroke-width="9" stroke-linecap="round" fill="none"/></svg>';
+const O_SVG = '<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="31" stroke="#f0a52b" stroke-width="9" fill="none"/></svg>';
+let board, over, busy, winLine, hintCell = null;
+const $ = s => document.querySelector(s);
+const val = name => document.querySelector(`input[name=${name}]:checked`).value;
+
+function render() {
+  const el = $('#board'); el.innerHTML = '';
+  board.forEach((c, i) => {
+    const b = document.createElement('button');
+    b.className = 'cell' + (winLine && winLine.includes(i) ? ' win' : '') + (hintCell === i ? ' hint' : '');
+    b.innerHTML = `<span class="num">${i}</span>` + (c === 'X' ? X_SVG : c === 'O' ? O_SVG : '');
+    b.disabled = over || busy || c !== ' ';
+    b.setAttribute('aria-label', `cell ${i} ${c === ' ' ? 'empty' : c}`);
+    b.onclick = () => play(i);
+    el.appendChild(b);
+  });
+  $('#hint').disabled = over || busy;
+}
+
+function clearHint() { hintCell = null; $('#hintbox').style.display = 'none'; }
+
+async function getHint() {
+  if (over || busy) return;
+  try {
+    const r = await fetch('/api/hint', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ board }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    hintCell = d.cell;
+    const outcome = { win: 'With best play you can WIN.', draw: 'With best play the game is a draw.', loss: 'The position is difficult: the computer wins if it plays perfectly.' }[d.outcome];
+    const box = $('#hintbox');
+    box.innerHTML = `<h2>&#128161; Hint</h2><p>Play cell <b>${d.cell}</b></p><p>${d.reason}</p><p>${outcome}</p>`;
+    box.style.display = 'block';
+    render();
+  } catch (e) { setStatus('Error: ' + e.message); }
+}
+
+function setStatus(t) { $('#status').textContent = t; }
+
+function showAI(ai) {
+  if (!ai) return;
+  $('#info').innerHTML = `<h2>Last AI move</h2><p>Cell: <b>${ai.cell}</b></p>
+    <p>Nodes visited: <b>${ai.nodes.toLocaleString()}</b></p><p>Time: <b>${ai.time_ms} ms</b></p>`;
+}
+
+function finish(status) {
+  if (!status.over) { setStatus('Your turn (X)'); return; }
+  over = true; winLine = status.line;
+  setStatus(status.draw ? "It's a draw!" : status.winner === 'X' ? 'You win!' : 'Computer wins!');
+}
+
+async function send(move) {
+  clearHint(); busy = true; setStatus('Computer is thinking...'); render();
+  try {
+    const r = await fetch('/api/play', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ board, move, level: val('level'), algorithm: val('algo') }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    board = d.board; showAI(d.ai); busy = false; finish(d.status);
+  } catch (e) { busy = false; setStatus('Error: ' + e.message); }
+  render();
+}
+
+function play(i) { if (!over && !busy) send(i); }
+
+function newGame() {
+  clearHint(); board = Array(9).fill(' '); over = false; busy = false; winLine = null;
+  $('#info').innerHTML = '<h2>Last AI move</h2><p>No move yet</p>';
+  setStatus('Your turn (X)'); render();
+  if (val('first') === 'computer') send(null);
+}
+
+$('#new').onclick = newGame;
+$('#hint').onclick = getHint;
+document.querySelectorAll('input[type=radio]').forEach(r => r.onchange = newGame);
+newGame();
+</script>
+</body>
+</html>
